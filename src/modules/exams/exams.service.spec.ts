@@ -134,6 +134,90 @@ describe('ExamsService', () => {
       expect(res.score).toBe(100);
       expect(res.passed).toBe(true);
     });
+
+    it('should throw ForbiddenException and never call examAttempt.create when student is ineligible', async () => {
+      mockPrisma.exam.findUnique.mockResolvedValue({
+        id: 'exam-1',
+        courseId: 'course-1',
+        passingScore: 70,
+        cooldownHours: 24,
+        questions: [],
+      });
+      mockPrisma.enrollment.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.submitExam('student-1', 'exam-1', { answers: {} }),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(mockPrisma.examAttempt.create).not.toHaveBeenCalled();
+    });
+
+    it('should record passed: true when score equals passingScore exactly', async () => {
+      // 1 out of 2 questions correct → 50 points; passingScore = 50
+      const questions = [
+        { id: 'q1', points: 1, correctAnswer: [0] },
+        { id: 'q2', points: 1, correctAnswer: [1] },
+      ];
+
+      mockPrisma.exam.findUnique.mockResolvedValue({
+        id: 'exam-1',
+        courseId: 'course-1',
+        passingScore: 50,
+        cooldownHours: 24,
+        questions,
+      });
+      mockPrisma.enrollment.findUnique.mockResolvedValue({
+        progressPercent: 100,
+        status: 'COMPLETED',
+      });
+      mockPrisma.examAttempt.findFirst.mockResolvedValue(null);
+      mockPrisma.examAttempt.create.mockImplementation(({ data }) =>
+        Promise.resolve({ id: 'attempt-1', ...data }),
+      );
+
+      const res = await service.submitExam('student-1', 'exam-1', {
+        answers: { q1: [0], q2: [99] }, // q1 correct, q2 wrong → score = 50
+      });
+
+      expect(res.score).toBe(50);
+      expect(res.passed).toBe(true);
+      expect(mockPrisma.examAttempt.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ passed: true }) }),
+      );
+    });
+
+    it('should record passed: false when score is below passingScore', async () => {
+      const questions = [
+        { id: 'q1', points: 1, correctAnswer: [0] },
+        { id: 'q2', points: 1, correctAnswer: [1] },
+      ];
+
+      mockPrisma.exam.findUnique.mockResolvedValue({
+        id: 'exam-1',
+        courseId: 'course-1',
+        passingScore: 70,
+        cooldownHours: 24,
+        questions,
+      });
+      mockPrisma.enrollment.findUnique.mockResolvedValue({
+        progressPercent: 100,
+        status: 'COMPLETED',
+      });
+      mockPrisma.examAttempt.findFirst.mockResolvedValue(null);
+      mockPrisma.examAttempt.create.mockImplementation(({ data }) =>
+        Promise.resolve({ id: 'attempt-1', ...data }),
+      );
+
+      const res = await service.submitExam('student-1', 'exam-1', {
+        answers: { q1: [0], q2: [99] }, // q1 correct, q2 wrong → score = 50
+      });
+
+      expect(res.score).toBe(50);
+      expect(res.passed).toBe(false);
+      expect(mockPrisma.examAttempt.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ passed: false }) }),
+      );
+    });
   });
 
   describe('deleteExam', () => {
