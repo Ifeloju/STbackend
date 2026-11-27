@@ -107,12 +107,12 @@ describe('ExamsService', () => {
   });
 
   describe('submitExam', () => {
-    it('should validate answers and pass exam if score >= passingScore', async () => {
-      const questions = [
-        { id: 'q1', points: 1, correctAnswer: [0] },
-        { id: 'q2', points: 1, correctAnswer: [1] },
-      ];
+    const questions = [
+      { id: 'q1', points: 1, correctAnswer: [0] },
+      { id: 'q2', points: 1, correctAnswer: [1] },
+    ];
 
+    const setUpEligibleExam = () => {
       mockPrisma.exam.findUnique.mockResolvedValue({
         id: 'exam-1',
         courseId: 'course-1',
@@ -125,6 +125,10 @@ describe('ExamsService', () => {
         status: 'COMPLETED',
       });
       mockPrisma.examAttempt.findFirst.mockResolvedValue(null);
+    };
+
+    it('should validate answers and pass exam if score >= passingScore', async () => {
+      setUpEligibleExam();
       mockPrisma.examAttempt.create.mockImplementation(({ data }) => Promise.resolve({ id: 'attempt-1', ...data }));
 
       const res = await service.submitExam('student-1', 'exam-1', {
@@ -148,6 +152,21 @@ describe('ExamsService', () => {
       await expect(
         service.submitExam('student-1', 'exam-1', { answers: {} }),
       ).rejects.toThrow(ForbiddenException);
+
+      expect(mockPrisma.examAttempt.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects missing question IDs before creating an attempt', async () => {
+      setUpEligibleExam();
+
+      await expect(
+        service.submitExam('student-1', 'exam-1', {
+          answers: { q1: [0] },
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockPrisma.examAttempt.create).not.toHaveBeenCalled();
+    });
 
       expect(mockPrisma.examAttempt.create).not.toHaveBeenCalled();
     });
@@ -217,6 +236,54 @@ describe('ExamsService', () => {
       expect(mockPrisma.examAttempt.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ passed: false }) }),
       );
+    });
+
+    it('rejects extra question IDs before creating an attempt', async () => {
+      setUpEligibleExam();
+
+      await expect(
+        service.submitExam('student-1', 'exam-1', {
+          answers: { q1: [0], q2: [1], q3: [0] },
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockPrisma.examAttempt.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects duplicate submitted question IDs before creating an attempt', async () => {
+      setUpEligibleExam();
+      const answers = { q1: [0], q2: [1] };
+      const actualObjectKeys = Object.keys;
+      const objectKeys = jest
+        .spyOn(Object, 'keys')
+        .mockImplementation((value) =>
+          value === answers ? ['q1', 'q1', 'q2'] : actualObjectKeys(value),
+        );
+
+      try {
+        await expect(
+          service.submitExam('student-1', 'exam-1', {
+            answers,
+          }),
+        ).rejects.toThrow(BadRequestException);
+      } finally {
+        objectKeys.mockRestore();
+      }
+
+      expect(mockPrisma.examAttempt.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects missing question IDs before creating an attempt', async () => {
+      setUpEligibleExam();
+
+      await expect(
+        service.submitExam('student-1', 'exam-1', {
+          answers: { q1: [0] },
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockPrisma.examAttempt.create).not.toHaveBeenCalled();
+    });
     });
   });
 
